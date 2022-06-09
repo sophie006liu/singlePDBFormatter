@@ -8,35 +8,36 @@ The other is to view individual Rosetta scores for a each residue.
 """
 CODE to view Rosetta energy scores for the entire protein.
 """
-def getLabelsAndWeights(fileName):
-    #open the file
+def getLabelsAndWeights(fileName): 
     with open(fileName) as f:
         lines = f.readlines()
-        #i is the index of the line in the PDB file the reader is currently at
-        #table_index is the index where the data begins
-        i = -1
-        table_index = -1
-        for line in lines:
+        i = -1           #i is the index of the line in the PDB file the function is currently at
+        table_index = -1 #table_index is the index where the Rosetta data begins in the PDB file
+        for line in lines: #find where the Rosetta data begins in the PDB file
             i += 1
             if ("pose" in line.lower()) and ("table" in line.lower()):
                 table_index = i
                 break
-    if (table_index != -1):
+    if (table_index != -1): 
         labelList = lines[table_index+1].split() #string of space separated labels to list of labels
-        weightsList = lines[table_index+2].split() #string of space separated weights to list of weights
+        weightsList = lines[table_index+3].split() #string of space separated weights to list of weights
         f.close()
         return labelList, weightsList
-
     else:
         f.close()
         print("Did not find where the table information is located in the document")
 
-def makeWeightTable(filename, pdb_name):
-    #initialize the two sections of the table
-    table_header = "<tr>\n"
+#extract the name of the PDB file given the entire path to the file
+def pdbFileName(filePath):
+    start = filePath.rfind("/") + 1 #find index of last "/"
+    end = filePath.rfind(".")       #find index of last "."
+    return filePath[start:end]
+
+def makePdbTable(session, filename):
+    table_header = "<tr>\n" #initialize the two sections of the table (header and rows)
+    pdb_name = pdbFileName(filename)
     table_rows = "<tr><td>" + pdb_name + "</td>\n"
 
-    #retrieve the labelList and the weightslist
     labelList, weightsList = getLabelsAndWeights(filename)
 
     for i in labelList: #append labels to the header
@@ -73,17 +74,21 @@ def getRosChainList(rosetta_lines):
   rosetta_chain_list = []
   start = -1
   end = -1
+
   for i in range(len(rosetta_lines)):
     line = rosetta_lines[i]
+    if "END_POSE_ENERGIES_TABLE" in line:
+      break
     terms = line.split()
-    residue = terms[0]
+    residue = terms[0] 
   
     if "NtermProtein" in residue: #case we are starting a new amino acid
       start = i
     elif "CtermProtein" in residue:
       end = i
-      rosetta_chain_list.append(rosetta_lines[start:end+1])
+      rosetta_chain_list.append(rosetta_lines[start:end+1]) 
       start = i + 1
+  
   return rosetta_chain_list
   
 #iterate through and display the rosetta chains
@@ -131,23 +136,29 @@ def getResInfo(rosetta_chain_list, pdb_chain_list):
    
     ros_res_stats = ros_chain[0].split() #get the first residue then find the _
     ros_res_and_num = ros_res_stats[0]
-    i = ros_res_and_num.find("_")
+    
+
+    if ros_res_and_num.count("_") > 1: 
+      i = ros_res_and_num.rfind("_")
+    else: 
+      i = ros_res_and_num.find("_")
+
     ros_res_num = ros_res_and_num[i+1:]
     shift = int(pdb_res_num) - int(ros_res_num)
   
     for residue_row in chain:
       stats = residue_row.split() #list of all the terms in the row 
       residue = stats[0][:3] #name of the residue, always 3 chars long
+  
+      ros_res_and_num = stats[0]
       #if the res num is located later in start of chain
-      if "termProteinFull" in stats[0]:  
-        ros_res_and_num = stats[0]
+      if ros_res_and_num.count("_") > 1: 
+        i = ros_res_and_num.rfind("_")
+      else: 
         i = ros_res_and_num.find("_")
-        ros_res_num = ros_res_and_num[i+1:]
-        residue_number = int(ros_res_num) + shift
-      else:  
-        ros_res_and_num = stats[0]
-        ros_res_num = ros_res_and_num[4:]
-        residue_number = int(ros_res_num) + shift
+      ros_res_num = ros_res_and_num[i+1:]
+      residue_number = int(ros_res_num) + shift
+
       total_energy = stats[-1]
       res_info_list.append([chain_label, residue, residue_number, total_energy])
        
@@ -167,9 +178,8 @@ def makeResTableString(res_info_list):
     table_rows += row_string
   table_string = "<table>" + table_header + table_rows + "</table>"
   return table_string
-    #run(session, log_command)
-  
-def makeResTable(filepath):
+    
+def makeResTable(session, filepath):
     #open the file
     with open(filepath) as f:
         txt = "".join(f.readlines())
@@ -188,6 +198,26 @@ def makeResTable(filepath):
    
     f.close() 
 
+# makeResTable("/Users/sophieliu/Desktop/example2.pdb")
+def makePdbAndResTable(session, filepath):
+  makePdbTable(session, filepath)
+  makeResTable(session, filepath)
 
-makeWeightTable('/Users/sophieliu/Desktop/example.pdb', "example")
-makeResTable('/Users/sophieliu/Desktop/example.pdb')
+def register_command(logger):
+    from chimerax.core.commands import register, CmdDesc, StringArg
+    from chimerax.atomic import AtomsArg
+    pdb_desc = CmdDesc(required = [('filename', StringArg)], 
+                   synopsis='Connect close atoms')
+    register('makePdbTable', pdb_desc, makePdbTable, logger=logger)
+
+    ros_desc = CmdDesc(required = [('filepath', StringArg)], 
+                   synopsis='Connect close atoms')
+    register('makeResTable', ros_desc, makeResTable, logger=logger)
+
+    desc = CmdDesc(required = [('filepath', StringArg)], 
+                   synopsis='Connect close atoms')
+    register('makePdbAndResTable', desc, makePdbAndResTable, logger=logger)
+
+register_command(session.logger)
+
+print("done")
